@@ -70,7 +70,13 @@ Deno.test('native extension loading and entry point errors', async () => {
   try {
     const extension = await compile('extension', dir);
     using db = new Database(':memory:');
-    assertThrows(() => db.loadExtension(extension, 'absent'), Error, 'absent');
+    // Loader messages vary by OS and locale; Windows omits the symbol name.
+    const error = assertThrows(
+      () => db.loadExtension(extension, 'absent'),
+      Database.SqliteError,
+    );
+    assertEquals(error.code, 'SQLITE_ERROR');
+    assert(error.message.length > 0);
     db.loadExtension(extension);
     assertEquals(db.prepare('SELECT extension_answer()').pluck().get(), 42);
     using second = new Database(':memory:');
