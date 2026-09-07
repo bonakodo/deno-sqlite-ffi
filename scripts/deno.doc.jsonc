@@ -1,0 +1,12 @@
+{
+  "extends": "../deno.jsonc",
+  "imports": {
+    "@bonakodo/sqlite": "../src/mod.ts",
+    "@bonakodo/sqlite/diagnostics.ts": "../src/native/mod.ts"
+  },
+  "compilerOptions": {
+    // Deno injects every module export into doc examples, including unused ones.
+    // The normal source check still enforces noUnusedLocals.
+    "noUnusedLocals": false
+  }
+}

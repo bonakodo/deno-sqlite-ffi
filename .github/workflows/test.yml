@@ -1,0 +1,116 @@
+name: Test
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  native:
+    name: Deno ${{ matrix.deno }} / ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        deno: ['2.0.0', 'latest']
+        runner: [
+          ubuntu-24.04,
+          ubuntu-24.04-arm,
+          macos-15-intel,
+          macos-15,
+          windows-2025,
+        ]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ matrix.deno }}
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - name: Build pinned SQLite from source
+        run: deno task build:native
+      - name: Test pinned library
+        run: deno task test
+      - name: Check package and documentation
+        if: matrix.deno == 'latest' && matrix.runner == 'ubuntu-24.04'
+        run: deno task check
+      - name: Require 100 percent source line coverage
+        if: matrix.deno == 'latest' && matrix.runner == 'ubuntu-24.04'
+        run: deno task coverage
+      - name: Benchmark smoke test
+        if: matrix.deno == 'latest' && matrix.runner == 'ubuntu-24.04'
+        run: deno task bench --filter "prepared scalar get"
+      - name: Upload coverage
+        if: matrix.deno == 'latest' && matrix.runner == 'ubuntu-24.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/lcov.info
+  system:
+    name: System SQLite / ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: latest
+      - name: Build source headers for ABI tests
+        run: deno task build:native
+      - name: Install Ubuntu SQLite
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-0 libsqlite3-dev
+          echo "DENO_SQLITE_PATH=$(cc -print-file-name=libsqlite3.so)" >> "$GITHUB_ENV"
+      - name: Install Homebrew SQLite
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install sqlite
+          echo "DENO_SQLITE_PATH=$(brew --prefix sqlite)/lib/libsqlite3.dylib" >> "$GITHUB_ENV"
+      - name: Test user-installed library
+        run: deno task test
+  extensions:
+    name: ICU and SpatiaLite / Deno ${{ matrix.deno }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        deno: ['2.0.0', 'latest']
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ matrix.deno }}
+      - name: Install explicit extension build and runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libicu-dev libsqlite3-dev libsqlite3-mod-spatialite pkg-config
+      - name: Build pinned SQLite and its ICU extension
+        run: |
+          deno task build:native
+          cc -fPIC -shared -Ibuild sqlite/ext/icu/icu.c -o build/sqlite-icu.so $(pkg-config --cflags --libs icu-uc icu-i18n)
+          echo "DENO_SQLITE_ICU_PATH=$PWD/build/sqlite-icu.so" >> "$GITHUB_ENV"
+          spatialite=$(dpkg-query -L libsqlite3-mod-spatialite | awk '/\/mod_spatialite\.so$/ { print; exit }')
+          test -n "$spatialite"
+          echo "DENO_SQLITE_SPATIALITE_PATH=$spatialite" >> "$GITHUB_ENV"
+      - name: Test extensions with pinned SQLite
+        env:
+          DENO_SQLITE_PATH: ${{ github.workspace }}/build/libsqlite3.so
+        run: deno task test:extensions
+      - name: Test extensions with system SQLite
+        run: DENO_SQLITE_PATH="$(cc -print-file-name=libsqlite3.so)" deno task test:extensions

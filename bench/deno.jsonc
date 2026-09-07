@@ -1,0 +1,9 @@
+{
+  "lock": { "path": "deno.lock", "frozen": true },
+  "nodeModulesDir": "auto",
+  "imports": {
+    "better-sqlite3": "npm:better-sqlite3@13.0.3",
+    "@db/sqlite": "jsr:@db/sqlite@0.13.0"
+  },
+  "fmt": { "singleQuote": true, "lineWidth": 80, "proseWrap": "preserve" }
+}

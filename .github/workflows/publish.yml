@@ -1,0 +1,25 @@
+name: Publish
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+  publish:
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: latest
+      # Link @bonakodo/sqlite to bonakodo/deno-sqlite-ffi in JSR settings.
+      - name: Publish to JSR
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: deno publish --set-version "${RELEASE_TAG#v}"
