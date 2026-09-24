@@ -45,6 +45,7 @@ export class Statement<T = Row> {
   #mode: RowMode = 'object';
   #bound = false;
   #busy = false;
+  #binding = false;
   #reader: boolean;
   #readonly: boolean;
   #bindings: BindingLayout;
@@ -74,7 +75,7 @@ export class Statement<T = Row> {
     if (!this.#connection.statements.has(this.#pointer)) {
       throw new TypeError('Statement has been finalized');
     }
-    if (this.#busy) {
+    if (this.#busy || this.#binding) {
       throw new TypeError('This statement is busy executing a query');
     }
   }
@@ -101,13 +102,26 @@ export class Statement<T = Row> {
     }
     try {
       if (!this.#bound && (this.#bindings.count || parameters.length)) {
-        bind(this.#connection, this.#pointer, parameters, this.#bindings);
+        this.#bind(parameters);
+        // A parameter getter can open an iterator on another statement.
+        if (!this.#readonly) this.#connection.assertIdle(true);
       }
       if (this.#connection.verbose) this.#connection.log(this.#pointer);
       this.#firstRow = true;
     } catch (error) {
       this.#reset();
       throw error;
+    }
+  }
+  #bind(parameters: BindParameter[]): void {
+    // Keep this allocation alive while getters may run other statements.
+    this.#binding = true;
+    this.#connection.bindings++;
+    try {
+      bind(this.#connection, this.#pointer, parameters, this.#bindings);
+    } finally {
+      this.#binding = false;
+      this.#connection.bindings--;
     }
   }
   #reset(suppress = false, alreadyReset = false): void {
@@ -272,6 +286,7 @@ export class Statement<T = Row> {
       },
       next: () => {
         if (closed) return { value: undefined, done: true };
+        this.#connection.assertIdle();
         try {
           if (this.#step() === 100) return { value: this.#row(), done: false };
           close();
@@ -282,6 +297,7 @@ export class Statement<T = Row> {
         }
       },
       return: () => {
+        if (!closed) this.#connection.assertIdle();
         close();
         return { value: undefined, done: true };
       },
@@ -306,7 +322,7 @@ export class Statement<T = Row> {
       throw new TypeError('The statement already has bound parameters');
     }
     try {
-      bind(this.#connection, this.#pointer, parameters, this.#bindings);
+      this.#bind(parameters);
       this.#bound = true;
     } catch (error) {
       this.#reset();

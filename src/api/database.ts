@@ -515,11 +515,16 @@ export class Database {
    * Calling this again after closing has no effect.
    *
    * @returns This database.
-   * @throws {TypeError} If a query or row iterator is active.
+   * @throws {TypeError} If a query, parameter binding, or row iterator is active.
    */
   close(): this {
     if (!this.open) return this;
     this.#connection.assertIdle(true);
+    if (this.#connection.bindings) {
+      throw new TypeError(
+        'This database connection is busy binding parameters',
+      );
+    }
     databaseFinalizer.unregister(this);
     this.#connection.close();
     return this;

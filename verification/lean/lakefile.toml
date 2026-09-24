@@ -1,0 +1,10 @@
+name = "lifecycle"
+version = "1.0.0"
+defaultTargets = ["Lifecycle", "lifecycle"]
+
+[[lean_lib]]
+name = "Lifecycle"
+
+[[lean_exe]]
+name = "lifecycle"
+root = "Main"

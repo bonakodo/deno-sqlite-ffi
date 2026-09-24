@@ -1,6 +1,6 @@
 {
   "name": "@bonakodo/sqlite",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "lock": {
     "path": "deno.lock",
@@ -18,7 +18,13 @@
     "coverage": "deno run -A scripts/coverage.ts",
     "bench": "deno run -A scripts/bench.ts",
     "bench:compare": "deno run -A scripts/bench.ts --compare",
-    "check": "deno run -A scripts/check.ts"
+    "check": "deno run -A scripts/check.ts",
+    "verify:install": "deno run -A scripts/install_lean.ts",
+    "verify": "deno run -A scripts/verify.ts all",
+    "verify:proofs": "deno run -A scripts/verify.ts proofs",
+    "verify:model": "deno run -A scripts/verify.ts model",
+    "verify:negative": "deno run -A scripts/verify.ts negative",
+    "verify:replay": "deno run -A scripts/verify.ts replay"
   },
   "imports": {
     "@std/assert": "jsr:@std/assert@1.0.19"
@@ -34,7 +40,8 @@
     "bench/deno.lock",
     "sqlite/",
     "build/",
-    "coverage/"
+    "coverage/",
+    "verification/lean/.lake/"
   ],
   "publish": {
     "include": [

@@ -6,6 +6,162 @@ import Database, {
   SqliteError,
   type TableDefinition,
 } from '../../src/mod.ts';
+import { native } from '../../src/native/loader.ts';
+
+Deno.test('callbacks cannot advance or return an active iterator', () => {
+  for (const source of ['function', 'verbose']) {
+    let callback = () => {};
+    using db = new Database(':memory:', {
+      verbose: source === 'verbose' ? () => callback() : null,
+    });
+    db.function('reenter', () => {
+      if (source === 'function') callback();
+      return 7;
+    });
+    const statement = db.prepare('SELECT 1 AS x UNION ALL SELECT 2');
+    const closed = db.prepare('SELECT 3').iterate();
+    closed.return!();
+    const outer = db.prepare('SELECT reenter() AS x');
+    const iterator = statement.iterate();
+    callback = () => {
+      const s = native() as {
+        -readonly [K in keyof ReturnType<typeof native>]: ReturnType<
+          typeof native
+        >[K];
+      };
+      const step = s.sqlite3_step;
+      const reset = s.sqlite3_reset;
+      // Fail before SQLite if a regression permits nested native access.
+      s.sqlite3_step = s.sqlite3_reset = () => {
+        throw new Error('Unexpected native iterator access during a callback');
+      };
+      try {
+        assertThrows(() => iterator.next(), TypeError, 'busy');
+        assertThrows(() => iterator.return!(), TypeError, 'busy');
+        assert(statement.busy);
+        assertThrows(() => db.prepare('SELECT 4'), TypeError, 'busy');
+        assertEquals(closed.next(), { value: undefined, done: true });
+        assertEquals(closed.return!(), { value: undefined, done: true });
+      } finally {
+        s.sqlite3_step = step;
+        s.sqlite3_reset = reset;
+      }
+    };
+    try {
+      assertEquals(outer.get(), { x: 7 });
+      callback = () => {};
+      assert(statement.busy);
+      assertEquals(iterator.next(), { value: { x: 1 }, done: false });
+      assertEquals(iterator.return!(), { value: undefined, done: true });
+      assertEquals(iterator.return!(), { value: undefined, done: true });
+      assert(!statement.busy);
+      assertEquals(statement.all(), [{ x: 1 }, { x: 2 }]);
+    } finally {
+      callback = () => {};
+      iterator.return!();
+    }
+  }
+});
+
+Deno.test('parameter getters retain binding ownership and allow other statements', () => {
+  for (const permanent of [false, true]) {
+    using db = new Database(':memory:');
+    const statement = db.prepare('SELECT $x AS x');
+    const other = db.prepare('SELECT $inner AS x');
+    const s = native() as {
+      -readonly [K in keyof ReturnType<typeof native>]: ReturnType<
+        typeof native
+      >[K];
+    };
+    const finalize = s.sqlite3_finalize;
+    const reset = s.sqlite3_reset;
+    const released = new Set<Deno.PointerObject>();
+    s.sqlite3_finalize = (pointer) => {
+      if (pointer) released.add(pointer);
+      return finalize(pointer);
+    };
+    s.sqlite3_reset = (pointer) => {
+      // If ownership regresses, report the bad call before it reaches SQLite.
+      if (pointer && released.has(pointer)) {
+        throw new Error('Unexpected reset after parameter getter disposal');
+      }
+      return reset(pointer);
+    };
+    const parameters = {
+      get x() {
+        assertThrows(() => statement.get(), TypeError, 'busy');
+        assertThrows(() => statement[Symbol.dispose](), TypeError, 'busy');
+        assertThrows(() => db.close(), TypeError, 'busy');
+        assertEquals(
+          other.get({
+            get inner() {
+              assertThrows(() => db.close(), TypeError, 'busy');
+              return 9;
+            },
+          }),
+          { x: 9 },
+        );
+        using created = db.prepare('SELECT 4');
+        assertEquals(created.get(), { '4': 4 });
+        db.exec('CREATE TABLE IF NOT EXISTS allowed(x)');
+        assert(!statement.busy);
+        return 5;
+      },
+    };
+    const error = new Error('parameter getter');
+    const throws = {
+      get x(): number {
+        throw error;
+      },
+    };
+    try {
+      assertEquals(
+        assertThrows(() =>
+          permanent ? statement.bind(throws) : statement.get(throws)
+        ),
+        error,
+      );
+      assertEquals(other.get({ inner: 9 }), { x: 9 });
+      if (permanent) {
+        statement.bind(parameters);
+        assertEquals(statement.get(), { x: 5 });
+      } else assertEquals(statement.get(parameters), { x: 5 });
+      assertEquals(other.get({ inner: 9 }), { x: 9 });
+      db.close();
+    } finally {
+      s.sqlite3_finalize = finalize;
+      s.sqlite3_reset = reset;
+    }
+  }
+});
+
+Deno.test('parameter getters cannot bypass iterator write ownership', () => {
+  using db = new Database(':memory:');
+  db.exec('CREATE TABLE t(x)');
+  const reader = db.prepare('SELECT 1 AS x UNION ALL SELECT 2');
+  const writer = db.prepare('INSERT INTO t VALUES($x)');
+  let iterator: IterableIterator<unknown> | undefined;
+  try {
+    assertThrows(
+      () =>
+        writer.run({
+          get x() {
+            iterator = reader.iterate();
+            return 5;
+          },
+        }),
+      TypeError,
+      'busy',
+    );
+    assert(reader.busy);
+    assertEquals(db.prepare('SELECT * FROM t').all(), []);
+    assertEquals(iterator!.next(), { value: { x: 1 }, done: false });
+    iterator!.return!();
+    assertEquals(writer.run({ x: 6 }).changes, 1);
+  } finally {
+    iterator?.return?.();
+  }
+});
 
 Deno.test('function option validation, arity, varargs, and directOnly', () => {
   using db = new Database(':memory:');

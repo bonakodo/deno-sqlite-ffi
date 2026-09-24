@@ -9,6 +9,32 @@ on:
 permissions:
   contents: read
 jobs:
+  verification:
+    name: Lean lifecycle proofs and real SQLite model tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: '2.9.6'
+      - name: Install pinned Lean with checksum verification
+        run: deno task verify:install
+      - name: Build pinned SQLite
+        run: deno task build:native
+      - name: Check proofs, axiom audit, model traces, and negative controls
+        env:
+          DENO_SQLITE_PATH: ${{ github.workspace }}/build/libsqlite3.so
+        run: deno task verify
+      - name: Retain replayable failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifecycle-verification-failures
+          path: build/verification-failures/
+          if-no-files-found: ignore
   native:
     name: Deno ${{ matrix.deno }} / ${{ matrix.runner }}
     strategy:

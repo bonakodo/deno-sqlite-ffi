@@ -14,6 +14,8 @@ export class Connection {
   pointer: Deno.PointerValue = null;
   executing = false;
   iterators = 0;
+  // Parameter getters may use other statements, but must not close the database.
+  bindings = 0;
   safe = false;
   error: { value: unknown } | undefined;
   statements: Set<Deno.PointerObject> = new Set();

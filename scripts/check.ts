@@ -14,6 +14,7 @@ await run(deno, [
   'examples/basic.ts',
   'examples/advanced.ts',
   'bench/sqlite_bench.ts',
+  'verification/model/main.ts',
 ]);
 await run(deno, ['doc', '--lint', ...entrypoints]);
 const docConfig = '--config=scripts/deno.doc.jsonc';

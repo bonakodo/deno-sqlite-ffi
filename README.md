@@ -42,7 +42,7 @@ for setup and tested behavior.
 Add the package to your Deno project:
 
 ```sh
-deno add jsr:@bonakodo/sqlite@0.1.0
+deno add jsr:@bonakodo/sqlite@0.1.1
 ```
 
 This adds the import mapping used in the examples below. Install and select a
